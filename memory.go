@@ -12,7 +12,15 @@ func NewMemory() *Memory {
 	return &Memory{}
 }
 
-func (m *Memory) Fetch(address int) (uint16, error) {
+func (m *Memory) Fetch(address int) (uint8, error) {
+	if address < 0 || address >= memSize {
+		return 0, fmt.Errorf("invalid address: %d", address)
+	}
+
+	return uint8(m.data[address]), nil
+}
+
+func (m *Memory) Fetch16(address int) (uint16, error) {
 	if address < 0 || address >= memSize-1 {
 		return 0, fmt.Errorf("invalid address: %d", address)
 	}

@@ -36,6 +36,9 @@ type Chip8 struct {
 	l     uint16
 	sp    uint
 	stack [16]uint16
+
+	dt uint8
+	st uint8
 }
 
 func NewChip8() *Chip8 {
@@ -71,56 +74,98 @@ func (c *Chip8) LoadProgram(data []byte) error {
 func (c *Chip8) Run() {
 	go func() {
 		for {
-			c.cycle()
+			err := c.cycle()
+			if err != nil {
+				panic(err)
+			}
 			time.Sleep(17 * time.Millisecond)
 		}
 	}()
 	c.display.Run()
 }
 
-func (c *Chip8) cycle() error {
-	opcode, err := c.mem.Fetch(int(c.pc))
-	if err != nil {
-		return xerrors.Errorf("failed to fetch memory: %w", err)
-	}
+type pcOrder interface {
+	newPC(cur uint16) uint16
+}
 
+type Next struct {
+}
+
+func (n *Next) newPC(cur uint16) uint16 {
+	return cur + 2
+}
+
+var next = &Next{}
+
+type Skip struct {
+}
+
+func (n *Skip) newPC(cur uint16) uint16 {
+	return cur + 4
+}
+
+var skip = &Skip{}
+
+type Jump struct {
+	to uint16
+}
+
+func NewJump(to uint16) pcOrder {
+	return &Jump{to: to}
+}
+
+func (j *Jump) newPC(cur uint16) uint16 {
+	return j.to
+}
+
+func (c *Chip8) order(opcode uint16) (pcOrder, error) {
+	x := (opcode & 0x0F00) >> 8
+	y := (opcode & 0x00F0) >> 4
 	switch opcode & 0xF000 {
 	case 0x0000:
-		// TODO
+		switch opcode {
+		case 0x00E0:
+			c.display.Clear()
+			return next, nil
+		case 0x00EE:
+			c.sp--
+			newPc := c.stack[c.sp]
+			return NewJump(newPc), nil
+		default:
+			return next, nil
+			// return next, fmt.Errorf("undefined opcode: %x", opcode)
+		}
 	case 0X1000:
-		c.pc = opcode & 0x0FFF
+		return NewJump(opcode & 0x0FFF), nil
 	case 0x2000:
 		c.stack[c.sp] = c.pc
 		c.sp++
-		c.pc = opcode & 0x0FFF
+		return NewJump(opcode & 0x0FFF), nil
 	case 0x3000:
-		if c.v[(opcode&0x0F00)>>8] == uint8(opcode&0x00FF) {
-			c.pc += 4
-			return nil
+		if c.v[x] == uint8(opcode&0x00FF) {
+			return skip, nil
 		}
-		c.pc += 2
+		return next, nil
 	case 0x4000:
-		if c.v[(opcode&0x0F00)>>8] != uint8(opcode&0x00FF) {
-			c.pc += 4
-			return nil
+		if c.v[x] != uint8(opcode&0x00FF) {
+			return skip, nil
 		}
-		c.pc += 2
+		return next, nil
 	case 0x5000:
-		if c.v[(opcode&0x0F00)>>8] == c.v[(opcode&0x00F0)>>4] {
-			c.pc += 4
-			return nil
+		if c.v[x] == c.v[y] {
+			return skip, nil
 		}
-		c.pc += 2
+		return next, nil
 	case 0x6000:
-		c.v[(opcode&0x0F00)>>8] = uint8(opcode & 0x00FF)
-		c.pc += 2
+		c.v[x] = uint8(opcode & 0x00FF)
+		return next, nil
 	case 0x7000:
-		c.v[(opcode&0x0F00)>>8] += uint8(opcode & 0x00FF)
-		c.pc += 2
+		c.v[x] += uint8(opcode & 0x00FF)
+		return next, nil
 	case 0x8000:
-		x := (opcode & 0x0F00) >> 8
-		y := (opcode & 0x00F0) >> 4
 		switch opcode & 0x000F {
+		case 0x0000:
+			c.v[x] = c.v[y]
 		case 0x0001:
 			c.v[x] |= c.v[y]
 		case 0x0002:
@@ -128,70 +173,136 @@ func (c *Chip8) cycle() error {
 		case 0x0003:
 			c.v[x] ^= c.v[y]
 		case 0x0004:
+			if c.v[y] > (0xFF - c.v[x]) {
+				c.v[0xF] = 1
+			} else {
+				c.v[0xF] = 0
+			}
 			c.v[x] += c.v[y]
 		case 0x0005:
+			if c.v[x] > c.v[y] {
+				c.v[0xF] = 1
+			} else {
+				c.v[0xF] = 0
+			}
 			c.v[x] -= c.v[y]
 		case 0x0006:
+			c.v[0xF] = c.v[x] & 0x1
 			c.v[x] >>= 1
 		case 0x0007:
+			if c.v[x] < c.v[y] {
+				c.v[0xF] = 1
+			} else {
+				c.v[0xF] = 0
+			}
 			c.v[x] = c.v[y] - c.v[x]
 		case 0x000E:
+			if c.v[x]&0x80 > 0 {
+				c.v[0xF] = 1
+			} else {
+				c.v[0xF] = 0
+			}
 			c.v[x] <<= 1
 		default:
-			return fmt.Errorf("unknown opcode: %x", opcode)
+			return next, fmt.Errorf("unknown opcode: %x", opcode)
 		}
-		c.pc += 2
+		return next, nil
 	case 0x9000:
-		if c.v[(opcode&0x0F00)>>8] != c.v[(opcode&0x00F0)>>4] {
-			c.pc += 4
-			return nil
+		if c.v[x] != c.v[y] {
+			return skip, nil
 		}
-		c.pc += 2
+		return next, nil
 	case 0XA000:
 		c.l = opcode & 0x0FFF
-		c.pc += 2
+		return next, nil
 	case 0XB000:
-		c.pc = uint16(c.v[0]) + opcode&0x0FFF
-		c.pc += 2
+		return NewJump(uint16(c.v[0]) + opcode&0x0FFF), nil
 	case 0xC000:
-		c.v[(opcode&0x0F00)>>8] = uint8(rand.Uint32() & uint32(opcode) & 0x00FF)
-		c.pc += 2
+		c.v[x] = uint8(rand.Uint32() & uint32(opcode) & 0x00FF)
+		return next, nil
 	case 0xD000:
-		fmt.Println("pixel")
-		c.pc += 2
-		x := c.v[(opcode&0x0F00)>>8]
-		y := c.v[(opcode&0x00F0)>>4]
+		x := c.v[x]
+		y := c.v[y]
 		height := opcode & 0x000F
 		c.v[0xF] = 0
 		for yLine := 0; yLine < int(height); yLine++ {
 			pixel, err := c.mem.Fetch(int(c.l) + yLine)
 			if err != nil {
-				return xerrors.Errorf("failed to fetch data from memory: %w", err)
+				return next, xerrors.Errorf("failed to fetch data from memory: %w", err)
 			}
 
 			for xLine := 0; xLine < 8; xLine++ {
-				if (pixel & (0x80 >> xLine)) != 0 {
-					gfx, err := c.display.Get(x+uint8(xLine), y+uint8(yLine))
+				if (pixel & 0x80) > 0 {
+					isSet, err := c.display.Set(x+uint8(xLine), y+uint8(yLine))
 					if err != nil {
-						return xerrors.Errorf("failed to get display buffer: %w", err)
+						return next, xerrors.Errorf("failed to set display buffer(%d, %d): %w", x+uint8(xLine), y+uint8(yLine), err)
 					}
 
-					if gfx == 1 {
+					if isSet {
 						c.v[0xF] = 1
-						err := c.display.Set(x+uint8(xLine), y+uint8(yLine), gfx^1)
-						if err != nil {
-							return xerrors.Errorf("failed to set display buffer: %w", err)
-						}
 					}
 				}
+				pixel <<= 1
 			}
 		}
 		c.display.SetFlag()
+		return next, nil
+	// case 0xE000:
+	// TODO
 	case 0xF000:
-		// TODO
+		switch opcode & 0x00FF {
+		case 0x0007:
+			c.v[x] = c.dt
+		case 0x0015:
+			c.dt = c.v[x]
+		case 0x0018:
+			c.st = c.v[x]
+		case 0x001E:
+			c.l += uint16(c.v[x])
+		case 0x0029:
+			c.l = uint16(c.v[x]) * 5
+		case 0x0033:
+			num := c.v[x] % 10
+			for i := 3; i > 0; i-- {
+				err := c.mem.Set(int(c.l)+i-1, uint8(num%10))
+				if err != nil {
+					fmt.Println(err)
+				}
+				num /= 10
+			}
+		case 0x0055:
+			for i := 0; i <= int(x); i++ {
+				c.mem.Set(int(c.l)+i, c.v[i])
+			}
+		case 0x0065:
+			var err error
+			for i := 0; i <= int(x); i++ {
+				c.v[i], err = c.mem.Fetch(int(c.l) + i)
+				if err != nil {
+					fmt.Println(err)
+					err = nil
+				}
+			}
+		default:
+			fmt.Printf("%x\n", opcode)
+		}
+		return next, nil
 	default:
-		return fmt.Errorf("unknown opcode: %x", opcode)
+		return next, fmt.Errorf("unknown opcode: %x", opcode)
 	}
+}
+
+func (c *Chip8) cycle() error {
+	opcode, err := c.mem.Fetch16(int(c.pc))
+	if err != nil {
+		return xerrors.Errorf("failed to fetch memory: %w", err)
+	}
+
+	pcord, err := c.order(opcode)
+	if err != nil {
+		return xerrors.Errorf("failed to order: %w", err)
+	}
+	c.pc = pcord.newPC(c.pc)
 
 	return nil
 }
