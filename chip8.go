@@ -33,7 +33,7 @@ type Chip8 struct {
 
 	pc    uint16
 	v     [16]uint8
-	l     uint16
+	i     uint16
 	sp    uint
 	stack [16]uint16
 
@@ -78,7 +78,7 @@ func (c *Chip8) Run() {
 			if err != nil {
 				panic(err)
 			}
-			time.Sleep(17 * time.Millisecond)
+			time.Sleep(1 * time.Millisecond)
 		}
 	}()
 	c.display.Run()
@@ -132,13 +132,12 @@ func (c *Chip8) order(opcode uint16) (pcOrder, error) {
 			newPc := c.stack[c.sp]
 			return NewJump(newPc), nil
 		default:
-			return next, nil
-			// return next, fmt.Errorf("undefined opcode: %x", opcode)
+			return next, fmt.Errorf("undefined opcode: %x", opcode)
 		}
 	case 0X1000:
 		return NewJump(opcode & 0x0FFF), nil
 	case 0x2000:
-		c.stack[c.sp] = c.pc
+		c.stack[c.sp] = c.pc + 2
 		c.sp++
 		return NewJump(opcode & 0x0FFF), nil
 	case 0x3000:
@@ -213,7 +212,7 @@ func (c *Chip8) order(opcode uint16) (pcOrder, error) {
 		}
 		return next, nil
 	case 0XA000:
-		c.l = opcode & 0x0FFF
+		c.i = opcode & 0x0FFF
 		return next, nil
 	case 0XB000:
 		return NewJump(uint16(c.v[0]) + opcode&0x0FFF), nil
@@ -226,7 +225,7 @@ func (c *Chip8) order(opcode uint16) (pcOrder, error) {
 		height := opcode & 0x000F
 		c.v[0xF] = 0
 		for yLine := 0; yLine < int(height); yLine++ {
-			pixel, err := c.mem.Fetch(int(c.l) + yLine)
+			pixel, err := c.mem.Fetch(int(c.i) + yLine)
 			if err != nil {
 				return next, xerrors.Errorf("failed to fetch data from memory: %w", err)
 			}
@@ -247,8 +246,21 @@ func (c *Chip8) order(opcode uint16) (pcOrder, error) {
 		}
 		c.display.SetFlag()
 		return next, nil
-	// case 0xE000:
-	// TODO
+	case 0xE000:
+		switch opcode & 0x00FF {
+		case 0x009E:
+			if c.v[x] < 16 && c.display.keys[c.v[x]] {
+				return skip, nil
+			}
+			return next, nil
+		case 0x00A1:
+			if c.v[x] < 16 && !c.display.keys[c.v[x]] {
+				return skip, nil
+			}
+			return next, nil
+		default:
+			return next, fmt.Errorf("unknown opcode: %x", opcode)
+		}
 	case 0xF000:
 		switch opcode & 0x00FF {
 		case 0x0007:
@@ -258,13 +270,13 @@ func (c *Chip8) order(opcode uint16) (pcOrder, error) {
 		case 0x0018:
 			c.st = c.v[x]
 		case 0x001E:
-			c.l += uint16(c.v[x])
+			c.i += uint16(c.v[x])
 		case 0x0029:
-			c.l = uint16(c.v[x]) * 5
+			c.i = uint16(c.v[x]) * 5
 		case 0x0033:
 			num := c.v[x] % 10
 			for i := 3; i > 0; i-- {
-				err := c.mem.Set(int(c.l)+i-1, uint8(num%10))
+				err := c.mem.Set(int(c.i)+i-1, uint8(num%10))
 				if err != nil {
 					fmt.Println(err)
 				}
@@ -272,19 +284,19 @@ func (c *Chip8) order(opcode uint16) (pcOrder, error) {
 			}
 		case 0x0055:
 			for i := 0; i <= int(x); i++ {
-				c.mem.Set(int(c.l)+i, c.v[i])
+				c.mem.Set(int(c.i)+i, c.v[i])
 			}
 		case 0x0065:
 			var err error
 			for i := 0; i <= int(x); i++ {
-				c.v[i], err = c.mem.Fetch(int(c.l) + i)
+				c.v[i], err = c.mem.Fetch(int(c.i) + i)
 				if err != nil {
 					fmt.Println(err)
 					err = nil
 				}
 			}
 		default:
-			fmt.Printf("%x\n", opcode)
+			fmt.Printf("unknown opcode: %x\n", opcode)
 		}
 		return next, nil
 	default:
@@ -303,6 +315,17 @@ func (c *Chip8) cycle() error {
 		return xerrors.Errorf("failed to order: %w", err)
 	}
 	c.pc = pcord.newPC(c.pc)
+
+	if c.dt > 0 {
+		c.dt--
+	}
+
+	if c.st > 0 {
+		if c.st == 1 {
+			fmt.Println("beep!")
+			c.st--
+		}
+	}
 
 	return nil
 }

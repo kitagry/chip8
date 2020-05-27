@@ -14,6 +14,7 @@ const (
 
 type Display struct {
 	data   [width][height]byte
+	keys   [16]bool
 	update bool
 }
 
@@ -23,11 +24,11 @@ func NewDisplay() *Display {
 
 func (d *Display) Set(x, y uint8) (bool, error) {
 	if x >= width {
-		return false, fmt.Errorf("invalid x: %d", x)
+		x -= width
 	}
 
 	if y >= height {
-		return false, fmt.Errorf("invalid y: %d", y)
+		y -= height
 	}
 
 	d.data[x][y] = 1 ^ d.data[x][y]
@@ -59,6 +60,43 @@ func (d *Display) Clear() {
 }
 
 func (d *Display) Update(screen *ebiten.Image) error {
+	for i := 0; i < len(d.keys); i++ {
+		d.keys[i] = false
+	}
+	switch {
+	case ebiten.IsKeyPressed(ebiten.Key1):
+		d.keys[0] = true
+	case ebiten.IsKeyPressed(ebiten.Key2):
+		d.keys[1] = true
+	case ebiten.IsKeyPressed(ebiten.Key3):
+		d.keys[2] = true
+	case ebiten.IsKeyPressed(ebiten.Key4):
+		d.keys[3] = true
+	case ebiten.IsKeyPressed(ebiten.KeyQ):
+		d.keys[4] = true
+	case ebiten.IsKeyPressed(ebiten.KeyW):
+		d.keys[5] = true
+	case ebiten.IsKeyPressed(ebiten.KeyE):
+		d.keys[6] = true
+	case ebiten.IsKeyPressed(ebiten.KeyR):
+		d.keys[7] = true
+	case ebiten.IsKeyPressed(ebiten.KeyA):
+		d.keys[8] = true
+	case ebiten.IsKeyPressed(ebiten.KeyS):
+		d.keys[9] = true
+	case ebiten.IsKeyPressed(ebiten.KeyD):
+		d.keys[10] = true
+	case ebiten.IsKeyPressed(ebiten.KeyF):
+		d.keys[11] = true
+	case ebiten.IsKeyPressed(ebiten.KeyZ):
+		d.keys[12] = true
+	case ebiten.IsKeyPressed(ebiten.KeyX):
+		d.keys[13] = true
+	case ebiten.IsKeyPressed(ebiten.KeyC):
+		d.keys[14] = true
+	case ebiten.IsKeyPressed(ebiten.KeyV):
+		d.keys[15] = true
+	}
 	return nil
 }
 
