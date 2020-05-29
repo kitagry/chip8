@@ -78,7 +78,7 @@ func (c *Chip8) Run() {
 			if err != nil {
 				panic(err)
 			}
-			time.Sleep(1 * time.Millisecond)
+			time.Sleep(300 * time.Microsecond)
 		}
 	}()
 	c.display.Run()
@@ -265,6 +265,14 @@ func (c *Chip8) order(opcode uint16) (pcOrder, error) {
 		switch opcode & 0x00FF {
 		case 0x0007:
 			c.v[x] = c.dt
+		case 0x000A:
+			for i := 0; i < len(c.display.keys); i++ {
+				if c.display.keys[i] {
+					c.v[x] = uint8(i)
+					return next, nil
+				}
+			}
+			return NewJump(c.pc), nil
 		case 0x0015:
 			c.dt = c.v[x]
 		case 0x0018:
