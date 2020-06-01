@@ -118,7 +118,7 @@ func (j *Jump) newPC(cur uint16) uint16 {
 	return j.to
 }
 
-func (c *Chip8) order(opcode uint16) (pcOrder, error) {
+func (c *Chip8) instruct(opcode uint16) (pcOrder, error) {
 	x := (opcode & 0x0F00) >> 8
 	y := (opcode & 0x00F0) >> 4
 	switch opcode & 0xF000 {
@@ -318,7 +318,7 @@ func (c *Chip8) cycle() error {
 		return xerrors.Errorf("failed to fetch memory: %w", err)
 	}
 
-	pcord, err := c.order(opcode)
+	pcord, err := c.instruct(opcode)
 	if err != nil {
 		return xerrors.Errorf("failed to order: %w", err)
 	}
